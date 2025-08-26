@@ -36,6 +36,9 @@ class CrossValuation:
             print(f"------------------------------------training and valuating model n: {n} \n")
             fold_metrics: List[Dict[str, float]] = []
             kf = KFold(n_splits=self.k, shuffle=True, random_state=42)
+            model = self.inst.create_model(params, input_dim=self.input_dim, output_dim=self.output_dim)
+            initial_weights = model.get_weights()
+
 
             for tr_idx, te_idx in kf.split(self.X):
                 Xtr, Xte = self.X[tr_idx], self.X[te_idx]
@@ -43,7 +46,6 @@ class CrossValuation:
 
                 #print(f"Training fold shapes - X: {Xtr.shape}, y: {ytr.shape}")
 
-                model = self.inst.create_model(params, input_dim=self.input_dim, output_dim=self.output_dim)
                 start_time = time.perf_counter()
                 model.train(Xtr, ytr)
                 end_time = time.perf_counter()
@@ -53,20 +55,22 @@ class CrossValuation:
                 metrics["Train_Time"] = train_time
                 fold_metrics.append(metrics)
 
+                if isinstance(self.inst, TFModelInstantiator):
+                    model.set_weights(initial_weights)
+
                 '''if isinstance(self.inst, THModelInstantiator):
                     # Mitiga OOM su GPU tra i fold
                     if torch.backends.mps.is_available():
                         torch.mps.empty_cache()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache '''
-                
-                if isinstance(self.inst, TFModelInstantiator):
-                    clear_session()
 
             keys = fold_metrics[0].keys()
             avg = {k: float(np.mean([m[k] for m in fold_metrics])) for k in keys}
             std = {f"{k}_STD": float(np.std([m[k] for m in fold_metrics])) for k in keys}
             avg.update(std)
+            if isinstance(self.inst, TFModelInstantiator):
+                    clear_session()
             results.append((params, avg, std))
 
         return results

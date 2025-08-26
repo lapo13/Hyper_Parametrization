@@ -14,8 +14,8 @@ class Evolution:
         self.crossover_type = crossover_type
         self.base_mutation_rate = base_mutation_rate
         self.generation = 0
-        self.history: List[Tuple[Dict, Dict, Dict]] = []  # best per gen
-        self.history_socres: List[int] = []
+        self.scores: List[Tuple[Dict, float]] = []
+        self.history: List[Tuple[Dict, float]] = []  # best per gen
 
     # ---- normalizzazione metriche
     def _normalize_metrics(
@@ -84,19 +84,15 @@ class Evolution:
         return float(final_score)
     
     # ---- selezione ----
-    def _tournament_selection(self, population: list, scores: list, std: list) -> dict:
+    def _tournament_selection(self) -> dict:
         """
         Seleziona un individuo usando un torneo multi-metrica.
         La selezione considera tutte le metriche: R2 massimizzato, MAE/RMSE/MAPE minimizzati.
         """
-        bucket = random.sample(list(zip(population, scores, std)), k=min(self.tournament_size, len(population)))
+        
+        bucket = random.sample(self.scores, k=min(self.tournament_size, len(self.scores)))
+        best_ind = max(bucket, key=lambda x: x[1])[0]
 
-        scored_bucket = []
-        for ind, metric_mean, metric_dev in bucket:
-            score = self._normalize_metrics(metric_mean, metric_dev) 
-            scored_bucket.append((ind, score))
-
-        best_ind = max(scored_bucket, key=lambda x: x[1])[0]
         return best_ind
 
 
@@ -154,19 +150,18 @@ class Evolution:
         self.generation += 1
         mut_rate = self._adaptive_mut_rate(max_generations)
 
+        self.scores = [(r[0], self._normalize_metrics(r[1], r[2])) for r in results]
+
         # Elitismo usando lo score multi-metrica
-        sorted_res = sorted(results, key=lambda r: self._normalize_metrics(r[1], r[2]), reverse=True)
+        sorted_res = sorted(self.scores, key=lambda x: x[1], reverse=True)
         elite_params = [r[0] for r in sorted_res[:self.elitism]]
 
         # Nuova popolazione
         new_pop: List[Dict] = list(elite_params)
-        population = [r[0] for r in results]
-        scores = [r[1] for r in results]
-        std = [r[2] for r in results]
 
         while len(new_pop) < pop_size:
-            p1 = self._tournament_selection(population, scores, std)
-            p2 = self._tournament_selection(population, scores, std)
+            p1 = self._tournament_selection()
+            p2 = self._tournament_selection()
             child = self._crossover(p1, p2)
             child = self.hyper_space.mutate(child, mutation_rate=mut_rate)
             new_pop.append(child)
@@ -197,16 +192,8 @@ class Evolution:
             return False
 
         # 2. Estrai i punteggi della metrica di interesse dalle ultime 'patience' generazioni
-        recent_performance = []
-        recent_tuples = self.history[-patience:]
-        
-        try:
-            # La tupla è (params, scores, std_devs), quindi accediamo all'indice 1
-            for generation_tuple in recent_tuples:
-                recent_performance.append(self._normalize_metrics(generation_tuple[1], generation_tuple[2]))
-        except IndexError:
-            print("ERRORE: La struttura della history non corrisponde al formato atteso (params, scores, std_devs).")
-            return True
+        recent_tuples = self.scores[-patience:]
+        recent_performance = [r[1] for r in recent_tuples]
 
         # 3. Calcola la deviazione standard di questa finestra di performance
         std_dev = np.std(recent_performance)

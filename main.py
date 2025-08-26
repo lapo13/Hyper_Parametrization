@@ -28,22 +28,6 @@ def series_to_2d_array(series, output_dim=24):
         raise ValueError(f"Ogni elemento deve avere {output_dim} valori, trovato {arr.shape[1]}")
     return arr
 
-def multi_metric_score(metrics):
-    """
-    Calcola un punteggio combinato per più metriche.
-    R2 viene massimizzato, MAE/RMSE/MAPE minimizzati.
-    weights: dizionario opzionale con pesi per ciascuna metrica
-    """
-
-    score = 0.0
-    for key in metrics:
-        value = metrics[key]
-        if key == "R2":
-            score += value  # più grande è meglio
-        else:
-            score += (1 / (1 + value))  # più piccolo è meglio
-    return score
-
 if __name__ == "__main__":
     # Dati METRO
     path = "./data"
@@ -155,33 +139,29 @@ if __name__ == "__main__":
     evo = Evolution(space, elitism=1, tournament_size=3, crossover_type="uniform", base_mutation_rate=0.35)
 
     # Popolazione iniziale
-    pop_size = 256
+    pop_size = 64
     population = [space.sample() for _ in range(pop_size)]
     pop_decrease = 1
 
     # Ciclo evolutivo 
-    generations = 64
+    generations = 16
     for gen in range(generations):
-        print(f"------------------------------generation n: {gen+1}-----------------------------------\n")
-        if ((gen)%(pop_decrease)) == 0:
-            pop_size //= 2
-            pop_decrease *= 2 
-            print(f"---------------------population decreased at {pop_size}, next decrease in {pop_decrease - gen +1}")
+        print(f"------------------------------generation n: {gen}-----------------------------------\n")
         results = valuation.evaluate(population)
-        best = max(results, key=lambda x: multi_metric_score(x[1]))
-        print(f"Gen {gen+1} | Best R2: {best[1]['R2']:.4f} | MAE: {best[1]['MAE']:.4f} | RMSE: {best[1]['RMSE']:.4f} | MAPE: {best[1]['MAPE']:.4f}")
         if evo.early_stop_criteria():
             break
         population = evo.evolve(results, pop_size=pop_size, max_generations=generations)
-        print(f"params: {best[0]}")
         time.sleep(3)
+        if ((gen)%(pop_decrease)) == 0:
+            pop_size //= 2
+            pop_decrease *= 2 
+            print(f"---------------------population decreased at {pop_size}, next decrease in {pop_decrease - gen}")
 
     print("---------------------------Done.---------------------------------")
 
-    best_of_all = max(evo.history, key=lambda x: multi_metric_score(x[1]))
+    best_of_all = lambda lst: max(lst, key=lambda x: x[1])[0]
 
-    print(f"Params for best performance: {best_of_all[0]}")
-    print(f"Best performance results: {best_of_all[1]}")
+    print(f"Params for best performance: {best_of_all(evo.history)}")
 
     print(X_train_np.shape[1] == X_test_np.shape[1])
     print(y_train_np.shape[1] == y_test_np.shape[1])
@@ -189,7 +169,7 @@ if __name__ == "__main__":
     # Crea il modello
     input_dim = X_train_np.shape[1]
     output_dim = y_train_np.shape[1]
-    model = factory.create_model(best_of_all[0], input_dim, output_dim)
+    model = factory.create_model(best_of_all(evo.history), input_dim, output_dim)
 
     # Allena il modello
     model.train(X_train_np, y_train_np)

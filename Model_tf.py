@@ -36,6 +36,13 @@ class TFModel:
         outputs = layers.Dense(output_dim)(x)
         self.model = keras.Model(inputs, outputs)
 
+    def get_weights(self):
+        if self.model:
+            return self.model.get_weights()
+        
+    def set_weights(self, weights):
+        if self.model:
+            return self.model.set_weights(weights) 
     def train(self, X_train: np.ndarray, y_train: np.ndarray):
         assert self.model is not None, "Call build() first"
 
@@ -62,7 +69,7 @@ class TFModel:
             early_stop = EarlyStopping(
                 monitor="loss",         # puoi mettere anche "val_loss" se hai validation set
                 patience=self.params.get("early_stop_patience", 0),      # numero di epoche senza miglioramenti prima di fermarsi
-                restore_best_weights=True,  # ripristina i pesi migliori
+                #restore_best_weights=True,  # ripristina i pesi migliori
                 verbose=1
             )
 
