@@ -12,7 +12,7 @@ from Model_tf import TFModelInstantiator
 from valuation import CrossValuation, regression_metrics
 from Evolution import Evolution
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 
 def encode_timestamp_minute_cyclic(ts, prefix):
         time_in_minutes = ts.dt.hour * 60 + ts.dt.minute + ts.dt.second / 60
@@ -99,17 +99,21 @@ if __name__ == "__main__":
     y = df_final['TTT']
 
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)
+    X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
 
     print(f"Train size: {X_train.shape}, {y_train.shape}")
+    print(f"Train size: {X_val.shape}, {y_val.shape}")
     print(f"Test size: {X_test.shape}, {y_test.shape}")
 
     # Convert X data
     X_train_np = X_train.to_numpy().astype(np.float32)
+    X_train_np = X_val.to_numpy().astype(np.float32)
     X_test_np = X_test.to_numpy().astype(np.float32)
 
     # Convert y data
     y_train_np = series_to_2d_array(y_train, output_dim=24)
+    y_val_np = series_to_2d_array(y_val, output_dim=24)
     y_test_np  = series_to_2d_array(y_test, output_dim=24)
 
     # Debug prints
@@ -118,15 +122,20 @@ if __name__ == "__main__":
     print(f"y_train: {y_train_np.shape}")
 
     # Scaler per input
-    scaler_X = StandardScaler()
+    scaler_X = MinMaxScaler()
     X_train_np = scaler_X.fit_transform(X_train.to_numpy().astype(np.float32))
+    X_val_np = scaler_X.fit_transform(X_val.to_numpy().astype(np.float32))
     X_test_np  = scaler_X.transform(X_test.to_numpy().astype(np.float32))
 
+    print(f"X_test: {X_train_np.shape},  X_val: {X_val_np.shape}, X_train: {X_test_np.shape}")
     # Scaler per output (se serve normalizzare anche y)
-    scaler_y = StandardScaler()
+    scaler_y = MinMaxScaler()
     y_train_np = scaler_y.fit_transform(series_to_2d_array(y_train, output_dim=24))
+    y_val_np = scaler_y.fit_transform(series_to_2d_array(y_val, output_dim=24))
     y_test_np  = scaler_y.transform(series_to_2d_array(y_test, output_dim=24))
 
+    print(f"y_test: {y_train_np.shape}, y_val: {y_val_np.shape}, y_train: {y_test_np.shape}")
+    
     # Debug prints
     print("After normalization:")
     print(f"X_train: {X_train_np.shape}, mean={X_train_np.mean():.4f}, std={X_train_np.std():.4f}")
@@ -136,10 +145,10 @@ if __name__ == "__main__":
     space = HyperparameterSpace()
     factory = TFModelInstantiator()
     valuation = CrossValuation(factory, X_train_np, y_train_np, k=4)
-    evo = Evolution(space, elitism=1, tournament_size=3, crossover_type="uniform", base_mutation_rate=0.35)
+    evo = Evolution(space, elitism=1, tournament_size=4, crossover_type="uniform", base_mutation_rate=0.25)
 
     # Popolazione iniziale
-    pop_size = 64
+    pop_size = 128
     population = [space.sample() for _ in range(pop_size)]
     pop_decrease = 1
 
@@ -148,14 +157,18 @@ if __name__ == "__main__":
     for gen in range(generations):
         print(f"------------------------------generation n: {gen}-----------------------------------\n")
         results = valuation.evaluate(population)
+
         if evo.early_stop_criteria():
             break
-        population = evo.evolve(results, pop_size=pop_size, max_generations=generations)
-        time.sleep(3)
+        
         if ((gen)%(pop_decrease)) == 0:
             pop_size //= 2
-            pop_decrease *= 2 
+            pop_decrease *= 2
             print(f"---------------------population decreased at {pop_size}, next decrease in {pop_decrease - gen}")
+
+        population = evo.evolve(results, pop_size=pop_size, max_generations=generations)
+        time.sleep(3) 
+
 
     print("---------------------------Done.---------------------------------")
 
@@ -172,7 +185,7 @@ if __name__ == "__main__":
     model = factory.create_model(best_of_all(evo.history), input_dim, output_dim)
 
     # Allena il modello
-    model.train(X_train_np, y_train_np)
+    model.train(X_train_np, y_train_np, X_val_np, y_val_np)
 
     # Predizioni
     y_pred = model.predict(X_test_np)

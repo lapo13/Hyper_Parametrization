@@ -47,10 +47,13 @@ class CrossValuation:
                 #print(f"Training fold shapes - X: {Xtr.shape}, y: {ytr.shape}")
 
                 start_time = time.perf_counter()
-                model.train(Xtr, ytr)
+                model.train(Xtr, ytr, Xte, yte)
                 end_time = time.perf_counter()
+
                 preds = model.predict(Xte)
+
                 train_time = end_time - start_time if (end_time and start_time) else 0.0
+                
                 metrics = regression_metrics(yte, preds)
                 metrics["Train_Time"] = train_time
                 fold_metrics.append(metrics)

@@ -10,10 +10,6 @@ class HyperparameterSpace:
         self.space = {
             "learning_rate": ("continuous", 1e-4, 1e-1),  
             "architecture": ("categorical", [
-                # Architetture minimali (1 layer)
-                [32],
-                [64],
-                [128],
                 
                 # Architetture semplici (2 layers)
                 [64, 32],
@@ -25,10 +21,6 @@ class HyperparameterSpace:
                 [256, 128, 64],
                 [512, 256, 128],
                 
-                # Architetture complesse (4 layers)
-                [256, 128, 64, 32],
-                [512, 256, 128, 64],
-                
                 # Architetture a "bottleneck"
                 [256, 64, 256],
                 [128, 32, 128],
@@ -37,13 +29,13 @@ class HyperparameterSpace:
                 [32, 64, 128],
                 [64, 128, 256]
             ]), 
-            "activation": ("categorical", ["relu", "tanh", "gelu", "leaky_relu", "none"]),
-            "batch_size": ("discrete", [16, 32, 64, 128]), 
-            "dropout": ("continuous", 0.0, 0.5), 
-            "optimizer": ("categorical", ["adam", "adamw", "rmsprop"]),
-            "weight_decay": ("continuous", 1e-6, 1e-2),
-            "early_stop_patience": ("discrete", [5, 10, 15, 20]), 
-            "epochs": ("discrete", [100, 150, 200, 300])
+            "activation": ("categorical", ["relu", "sigmoid"]),
+            "batch_size": ("discrete", [16, 32, 64]), 
+            "dropout": ("discrete", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]), 
+            "optimizer": ("categorical", ["adam", "sgd"]),
+            "weight_decay": ("continuous", 1e-5, 1e-2),
+            "early_stop_patience": ("discrete", [10, 15, 20]), 
+            "epochs": ("discrete", [200, 300, 400, 500])
             }
 
     def _hash_params(self, params: Dict) -> Tuple[Tuple[str, object], ...]:
@@ -69,7 +61,7 @@ class HyperparameterSpace:
         
         if ptype == "continuous":
             # Parametri che beneficiano di distribuzione log-uniform
-            log_params = {"learning_rate", "weight_decay", "dropout"}
+            log_params = {"learning_rate", "weight_decay"}
             
             if name in log_params:
                 # Gestione speciale per weight_decay che può essere 0
@@ -80,15 +72,6 @@ class HyperparameterSpace:
                         return
                     # Altrimenti campiona da range log-uniform escludendo 0
                     lo = max(1e-8, 1e-6)  # Minimo non-zero
-                
-                # Gestione speciale per dropout
-                if name == "dropout" and lo == 0:
-                    # 10% chance di essere esattamente 0 (no dropout)
-                    if random.random() < 0.1:
-                        params[name] = 0.0
-                        return
-                    # Altrimenti campiona da range log-uniform escludendo 0
-                    lo = max(1e-8, 0.01)  # Minimo dropout significativo
                 
                 # Sampling log-uniform
                 log_lo = np.log10(max(lo, 1e-12))
@@ -106,7 +89,6 @@ class HyperparameterSpace:
         else:
             raise ValueError("parameter non continous")
 
-    # Esempio di utilizzo completo
     def sample(self):
         """Campiona un set completo di iperparametri"""
         params = {}

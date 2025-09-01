@@ -1,9 +1,31 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras # type: ignore
-from tensorflow.keras import layers, optimizers, losses # type: ignore
+from tensorflow.keras import layers, optimizers # type: ignore
 from typing import Dict, List
 from tensorflow.keras.callbacks import EarlyStopping # type: ignore
+
+
+def progressive_penalty_loss_tf(y_true, y_pred, alpha=2.0, threshold=1.5, penalty_weight=0.5):
+    """
+    Loss con penalità progressiva
+    """
+    # Errori per ogni ora
+    hourly_errors = tf.abs(y_pred - y_true)  # [batch, 24]
+    
+    # Componenti base
+    mean_errors = tf.reduce_mean(hourly_errors, axis=1)  # [batch]
+    std_errors = tf.math.reduce_std(hourly_errors, axis=1)  # [batch]
+    
+    # Penalità progressiva
+    max_errors = tf.reduce_max(hourly_errors, axis=1)  # [batch]
+    penalty = tf.square(tf.nn.relu(max_errors - threshold))
+    
+    # Score finale per ogni sample
+    sample_losses = mean_errors + alpha * std_errors + penalty_weight * penalty
+    
+    # IMPORTANTE: ritorna la media finale per avere uno scalare
+    return tf.reduce_mean(sample_losses)
 
 
 class TFModel:
@@ -21,7 +43,7 @@ class TFModel:
         activation = self.params.get("activation", "relu").lower()
         if activation == "none":
             activation = None
-        dropout = float(self.params.get("dropout", 0.0))
+        dropout = float(self.params.get("dropout", 0))
 
         inputs = keras.Input(shape=(input_dim,))
         x = inputs
@@ -43,7 +65,8 @@ class TFModel:
     def set_weights(self, weights):
         if self.model:
             return self.model.set_weights(weights) 
-    def train(self, X_train: np.ndarray, y_train: np.ndarray):
+        
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray):
         assert self.model is not None, "Call build() first"
 
         # Parametri
@@ -62,26 +85,27 @@ class TFModel:
             optimizer = optimizers.Adam(learning_rate=lr)
 
 
-        self.model.compile(optimizer=optimizer, loss="mae", metrics=["mae"])
+        self.model.compile(optimizer=optimizer, loss=progressive_penalty_loss_tf, metrics=["mae"])
 
         with tf.device(self.device):
             # Callback early stopping
             early_stop = EarlyStopping(
-                monitor="loss",         # puoi mettere anche "val_loss" se hai validation set
+                monitor="val_loss",
                 patience=self.params.get("early_stop_patience", 0),      # numero di epoche senza miglioramenti prima di fermarsi
-                #restore_best_weights=True,  # ripristina i pesi migliori
+                restore_best_weights=True,  # ripristina i pesi migliori
                 verbose=1
             )
 
             # Training
             hist = self.model.fit(
                 X_train, y_train,
+                validation_data=(X_val, y_val),
                 batch_size=batch_size,
                 epochs=epochs,
                 verbose=1,
                 shuffle=True,
-                callbacks=[early_stop]
-            )
+                callbacks=[early_stop])
+            
 
             # Accesso alle loss
             losses = hist.history["loss"]
