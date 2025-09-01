@@ -99,61 +99,76 @@ if __name__ == "__main__":
     y = df_final['TTT']
 
 
-    X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
-    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+    X_np = X.to_numpy().astype(np.float32)
+    y_np = series_to_2d_array(y, output_dim=24)
+
+    # Calcolo deviazione standard per ogni serie
+    std_scores = np.std(y_np, axis=1)
+
+    # Creo bin basati sui quantili
+    bins = np.quantile(std_scores, [0.2, 0.4, 0.6, 0.8])
+    std_bins = np.digitize(std_scores, bins)
+
+    # Primo split: train (80%) vs temp (20%)
+    # Passo anche std_bins per poter stratificare
+    X_train, X_temp, y_train, y_temp, bins_train_temp, bins_temp = train_test_split(
+        X_np, y_np, std_bins,
+        test_size=0.2,
+        random_state=42,
+        stratify=std_bins
+    )
+
+    # bins_temp è il sottoinsieme di std_bins corrispondente a X_temp/y_temp
+    # Secondo split: divido temp in val/test (50%-50% del temp)
+    X_val, X_test, y_val, y_test = train_test_split(
+        X_temp, y_temp,
+        test_size=0.5,
+        random_state=42,
+        stratify=bins_temp  # usa i bin corrispondenti al sottoinsieme
+    )
 
     print(f"Train size: {X_train.shape}, {y_train.shape}")
-    print(f"Train size: {X_val.shape}, {y_val.shape}")
+    print(f"Validation size: {X_val.shape}, {y_val.shape}")
     print(f"Test size: {X_test.shape}, {y_test.shape}")
-
-    # Convert X data
-    X_train_np = X_train.to_numpy().astype(np.float32)
-    X_train_np = X_val.to_numpy().astype(np.float32)
-    X_test_np = X_test.to_numpy().astype(np.float32)
-
-    # Convert y data
-    y_train_np = series_to_2d_array(y_train, output_dim=24)
-    y_val_np = series_to_2d_array(y_val, output_dim=24)
-    y_test_np  = series_to_2d_array(y_test, output_dim=24)
 
     # Debug prints
     print(f"Final shapes:")
-    print(f"X_train: {X_train_np.shape}")
-    print(f"y_train: {y_train_np.shape}")
+    print(f"X_train: {X_train.shape}")
+    print(f"X_val: {X_val.shape}")
+    print(f"y_train: {y_train.shape}")
 
     # Scaler per input
     scaler_X = MinMaxScaler()
-    X_train_np = scaler_X.fit_transform(X_train.to_numpy().astype(np.float32))
-    X_val_np = scaler_X.fit_transform(X_val.to_numpy().astype(np.float32))
-    X_test_np  = scaler_X.transform(X_test.to_numpy().astype(np.float32))
+    X_train = scaler_X.fit_transform(X_train)
+    X_val = scaler_X.fit_transform(X_val)
+    X_test  = scaler_X.transform(X_test)
 
-    print(f"X_test: {X_train_np.shape},  X_val: {X_val_np.shape}, X_train: {X_test_np.shape}")
     # Scaler per output (se serve normalizzare anche y)
     scaler_y = MinMaxScaler()
-    y_train_np = scaler_y.fit_transform(series_to_2d_array(y_train, output_dim=24))
-    y_val_np = scaler_y.fit_transform(series_to_2d_array(y_val, output_dim=24))
-    y_test_np  = scaler_y.transform(series_to_2d_array(y_test, output_dim=24))
+    y_train = scaler_y.fit_transform(y_train)
+    y_val = scaler_y.fit_transform(y_val)
+    y_test  = scaler_y.transform(y_test)
 
-    print(f"y_test: {y_train_np.shape}, y_val: {y_val_np.shape}, y_train: {y_test_np.shape}")
+    print(f"y_test: {y_train.shape}, y_val: {y_val.shape}, y_train: {y_test.shape}")
     
     # Debug prints
     print("After normalization:")
-    print(f"X_train: {X_train_np.shape}, mean={X_train_np.mean():.4f}, std={X_train_np.std():.4f}")
+    print(f"X_train: {X_train.shape}, mean={X_train.mean():.4f}, std={X_train.std():.4f}")
     
 
     # Componenti
     space = HyperparameterSpace()
     factory = TFModelInstantiator()
-    valuation = CrossValuation(factory, X_train_np, y_train_np, k=4)
+    valuation = CrossValuation(factory, X_train, y_train, k=4)
     evo = Evolution(space, elitism=1, tournament_size=4, crossover_type="uniform", base_mutation_rate=0.25)
 
     # Popolazione iniziale
-    pop_size = 128
+    pop_size = 32
     population = [space.sample() for _ in range(pop_size)]
     pop_decrease = 1
 
     # Ciclo evolutivo 
-    generations = 16
+    generations = 8
     for gen in range(generations):
         print(f"------------------------------generation n: {gen}-----------------------------------\n")
         results = valuation.evaluate(population)
@@ -176,25 +191,25 @@ if __name__ == "__main__":
 
     print(f"Params for best performance: {best_of_all(evo.history)}")
 
-    print(X_train_np.shape[1] == X_test_np.shape[1])
-    print(y_train_np.shape[1] == y_test_np.shape[1])
+    print(X_train.shape[1] == X_test.shape[1])
+    print(y_train.shape[1] == y_test.shape[1])
 
     # Crea il modello
-    input_dim = X_train_np.shape[1]
-    output_dim = y_train_np.shape[1]
+    input_dim = X_train.shape[1]
+    output_dim = y_train.shape[1]
     model = factory.create_model(best_of_all(evo.history), input_dim, output_dim)
 
     # Allena il modello
-    model.train(X_train_np, y_train_np, X_val_np, y_val_np)
+    model.train(X_train, y_train, X_val, y_val)
 
     # Predizioni
-    y_pred = model.predict(X_test_np)
+    y_pred = model.predict(X_test)
     #print(y_pred)
     #print(y_test)
 
     y_pred_np = np.array(y_pred).astype(np.float32)
 
-    y_test_np = scaler_y.inverse_transform(y_test_np)
+    y_test_np = scaler_y.inverse_transform(y_test)
     y_pred_np = scaler_y.inverse_transform(y_pred_np)
 
     # controllo dimensioni
