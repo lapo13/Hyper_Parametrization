@@ -12,7 +12,7 @@ from Model_tf import TFModelInstantiator
 from valuation import CrossValuation, regression_metrics
 from Evolution import Evolution
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, RobustScaler
 
 def encode_timestamp_minute_cyclic(ts, prefix):
         time_in_minutes = ts.dt.hour * 60 + ts.dt.minute + ts.dt.second / 60
@@ -104,10 +104,16 @@ if __name__ == "__main__":
 
     # Calcolo deviazione standard per ogni serie
     std_scores = np.std(y_np, axis=1)
+    #print(std_scores)
+    std_scores_log = np.log1p(std_scores)  # log(1+x) per evitare problemi con valori vicini a 0
+
+    std_scores_normalized = (std_scores_log - np.min(std_scores_log)) / (np.max(std_scores_log) - np.min(std_scores_log))
+
 
     # Creo bin basati sui quantili
-    bins = np.quantile(std_scores, [0.2, 0.4, 0.6, 0.8])
-    std_bins = np.digitize(std_scores, bins)
+    bins = np.quantile(std_scores_normalized, [0.2, 0.4, 0.6, 0.8])
+    std_bins = np.digitize(std_scores_normalized, bins)
+    #print(f"bins :", std_bins)
 
     # Primo split: train (80%) vs temp (20%)
     # Passo anche std_bins per poter stratificare
@@ -115,7 +121,8 @@ if __name__ == "__main__":
         X_np, y_np, std_bins,
         test_size=0.2,
         random_state=42,
-        stratify=std_bins
+        stratify=std_bins,
+        shuffle=True
     )
 
     # bins_temp è il sottoinsieme di std_bins corrispondente a X_temp/y_temp
@@ -124,7 +131,8 @@ if __name__ == "__main__":
         X_temp, y_temp,
         test_size=0.5,
         random_state=42,
-        stratify=bins_temp  # usa i bin corrispondenti al sottoinsieme
+        stratify=bins_temp,  # usa i bin corrispondenti al sottoinsieme
+        shuffle=True
     )
 
     print(f"Train size: {X_train.shape}, {y_train.shape}")
@@ -159,16 +167,16 @@ if __name__ == "__main__":
     # Componenti
     space = HyperparameterSpace()
     factory = TFModelInstantiator()
-    valuation = CrossValuation(factory, X_train, y_train, k=4)
-    evo = Evolution(space, elitism=1, tournament_size=4, crossover_type="uniform", base_mutation_rate=0.25)
+    valuation = CrossValuation(factory, X_train, y_train, iter= 4, k = 4)
+    evo = Evolution(space, elitism=1, tournament_size=4, crossover_type="multi_point", base_mutation_rate=0.35)
 
     # Popolazione iniziale
-    pop_size = 32
+    pop_size = 16
     population = [space.sample() for _ in range(pop_size)]
     pop_decrease = 1
 
     # Ciclo evolutivo 
-    generations = 8
+    generations = 4
     for gen in range(generations):
         print(f"------------------------------generation n: {gen}-----------------------------------\n")
         results = valuation.evaluate(population)

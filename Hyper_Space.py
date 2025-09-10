@@ -11,28 +11,27 @@ class HyperparameterSpace:
             "learning_rate": ("continuous", 1e-4, 1e-1),  
             "architecture": ("categorical", [
                 
-                # Architetture semplici (2 layers)
-                [64, 32],
-                [128, 64], 
-                [256, 128],
-                
                 # Architetture moderate (3 layers)
-                [128, 64, 32],
-                [256, 128, 64],
-                [512, 256, 128],
+                #[128, 64, 32],
+                #[256, 128, 64],
+                #[512, 256, 128],
                 
                 # Architetture a "bottleneck"
                 [256, 64, 256],
                 [128, 32, 128],
                 
                 # Architetture crescenti
-                [32, 64, 128],
-                [64, 128, 256]
+                #[32, 64, 128],
+                #[64, 128, 256],
+
+                #architetture a 4 layer "bottlenek"
+                [256, 64, 64, 256],
+                [128, 32, 32, 128]
             ]), 
-            "activation": ("categorical", ["relu", "sigmoid"]),
+            "activation": ("categorical", ["relu"]),
             "batch_size": ("discrete", [16, 32, 64]), 
             "dropout": ("discrete", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]), 
-            "optimizer": ("categorical", ["adam", "sgd"]),
+            "optimizer": ("categorical", ["adamw"]),
             "weight_decay": ("continuous", 1e-5, 1e-2),
             "early_stop_patience": ("discrete", [10, 15, 20]), 
             "epochs": ("discrete", [200, 300, 400, 500])
