@@ -171,7 +171,7 @@ class Evolution:
     
     def early_stop_criteria(
         self, 
-        patience: int = 10, 
+        patience: int, 
         tolerance: float = 1e-3
     ) -> bool:
         """

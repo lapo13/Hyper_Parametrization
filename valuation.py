@@ -10,9 +10,10 @@ from tensorflow.keras.backend import clear_session # type: ignore
 from Model_tf import TFModelInstantiator
 
 def regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    mask = y_true != 0
     mae = mean_absolute_error(y_true, y_pred)
     rmse = mean_squared_error(y_true, y_pred)
-    mape = float(np.mean(np.abs((y_true - y_pred) / (np.maximum(np.abs(y_true), 1e-2)))) * 100.0)
+    mape = float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100.0)
     r2 = r2_score(y_true, y_pred)
     return {"MAE": float(mae), "RMSE": float(rmse), "MAPE": float(mape), "R2": float(r2)}
 

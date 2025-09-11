@@ -6,7 +6,7 @@ from typing import Dict, List
 from tensorflow.keras.callbacks import EarlyStopping # type: ignore
 
 
-def progressive_penalty_loss_tf(y_true, y_pred, alpha=2.0, threshold=1.5, penalty_weight=0.5):
+def progressive_penalty_loss_tf(y_true, y_pred, alpha=2.5, beta=1.4, penalty_weight=0.5):
     """
     Loss con penalità progressiva
     """
@@ -19,7 +19,7 @@ def progressive_penalty_loss_tf(y_true, y_pred, alpha=2.0, threshold=1.5, penalt
     
     # Penalità progressiva
     max_errors = tf.reduce_max(hourly_errors, axis=1)  # [batch]
-    penalty = tf.square(tf.nn.relu(max_errors - threshold))
+    penalty = tf.square(tf.nn.relu(max_errors - beta*mean_errors))
     
     # Score finale per ogni sample
     sample_losses = mean_errors + alpha * std_errors + penalty_weight * penalty
@@ -85,7 +85,7 @@ class TFModel:
             optimizer = optimizers.Adam(learning_rate=lr)
 
 
-        self.model.compile(optimizer=optimizer, loss=progressive_penalty_loss_tf, metrics=["mae", "mape"])
+        self.model.compile(optimizer=optimizer, loss= "mae", metrics=["mae", "mape"])
 
         with tf.device(self.device):
             # Callback early stopping

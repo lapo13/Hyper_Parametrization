@@ -167,11 +167,11 @@ if __name__ == "__main__":
     # Componenti
     space = HyperparameterSpace()
     factory = TFModelInstantiator()
-    valuation = CrossValuation(factory, X_train, y_train, iter= 4, k = 4)
-    evo = Evolution(space, elitism=1, tournament_size=4, crossover_type="multi_point", base_mutation_rate=0.35)
+    valuation = CrossValuation(factory, X_train, y_train, iter= 5, k = 3)
+    evo = Evolution(space, elitism=0, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.35)
 
     # Popolazione iniziale
-    pop_size = 16
+    pop_size = 24
     population = [space.sample() for _ in range(pop_size)]
     pop_decrease = 1
 
@@ -181,7 +181,7 @@ if __name__ == "__main__":
         print(f"------------------------------generation n: {gen}-----------------------------------\n")
         results = valuation.evaluate(population)
 
-        if evo.early_stop_criteria():
+        if evo.early_stop_criteria(patience=3, tolerance= 5e-4):
             break
         
         if ((gen)%(pop_decrease)) == 0:
