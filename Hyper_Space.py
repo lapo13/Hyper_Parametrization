@@ -1,7 +1,7 @@
 import random
 import numpy as np
 
-from typing import Dict, Tuple, cast
+from typing import Dict, Tuple
 from decimal import Decimal, ROUND_DOWN
 
 class HyperparameterSpace:
@@ -10,31 +10,46 @@ class HyperparameterSpace:
         self.space = {
             "learning_rate": ("continuous", 1e-4, 1e-1),  
             "architecture": ("categorical", [
+                # Architetture leggere (1-2 layers)
+                [32],
+                [64],
+                [128],
+                [256],
                 
+                [32, 32],
+                [64, 64],
+                [128, 128],
+                [256, 256],
+
+                #aarchitetture medie (2 layers)
+                [64, 32],
+                [128, 64],
+                [256, 128],
+
                 # Architetture moderate (3 layers)
-                #[128, 64, 32],
-                #[256, 128, 64],
-                #[512, 256, 128],
+                [128, 64, 32],
+                [256, 128, 64],
+                [512, 256, 128],
                 
                 # Architetture a "bottleneck"
                 [256, 64, 256],
                 [128, 32, 128],
                 
                 # Architetture crescenti
-                #[32, 64, 128],
-                #[64, 128, 256],
+                [32, 64, 128],
+                [64, 128, 256],
 
                 #architetture a 4 layer "bottlenek"
                 [256, 64, 64, 256],
                 [128, 32, 32, 128]
             ]), 
             "activation": ("categorical", ["relu"]),
-            "batch_size": ("discrete", [16, 32, 64]), 
+            "batch_size": ("discrete", [16,32,64,128]), 
             "dropout": ("discrete", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]), 
-            "optimizer": ("categorical", ["adamw"]),
+            "optimizer": ("categorical", ["sgd"]),
             "weight_decay": ("continuous", 1e-5, 1e-2),
             "early_stop_patience": ("discrete", [10, 15, 20]), 
-            "epochs": ("discrete", [200, 300, 400, 500])
+            "epochs": ("discrete", [300, 400, 500, 600])
             }
 
     def _hash_params(self, params: Dict) -> Tuple[Tuple[str, object], ...]:

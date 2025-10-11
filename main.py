@@ -12,15 +12,88 @@ from Model_tf import TFModelInstantiator
 from valuation import CrossValuation, regression_metrics
 from Evolution import Evolution
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler, RobustScaler
+from sklearn.preprocessing import MinMaxScaler
 
-def encode_timestamp_minute_cyclic(ts, prefix):
-        time_in_minutes = ts.dt.hour * 60 + ts.dt.minute + ts.dt.second / 60
-        angle = 2 * np.pi * time_in_minutes / period_minutes
-        return {
-            f"{prefix}_sin": np.sin(angle),
-            f"{prefix}_cos": np.cos(angle)
-        }
+def smart_interpolation(df_list):
+    for i, df in enumerate(df_list):
+        print(f"Processing dataset {i+1}...")
+        
+        for column in df.columns:
+            missing_count = df[column].isna().sum()
+            if missing_count > 0:
+                print(f"  - Column '{column}': {missing_count} missing values")
+                
+                # Colonne numeriche
+                if pd.api.types.is_numeric_dtype(df[column]):
+                    # Se pochi missing values, interpolazione
+                    if missing_count / len(df) < 0.1:  # meno del 10%
+                        df[column].interpolate(method='linear', inplace=True)
+                    else:
+                        # Se molti missing, usa la media
+                        df[column].fillna(df[column].mean(), inplace=True)
+                
+                # Colonne stringa/categoriche
+                elif pd.api.types.is_string_dtype(df[column]) or pd.api.types.is_object_dtype(df[column]):
+                    # Usa la moda (valore più frequente)
+                    mode_values = df[column].mode()
+                    if not mode_values.empty:
+                        df[column].fillna(mode_values[0], inplace=True)
+                    else:
+                        df[column].fillna('Unknown', inplace=True)
+                
+                # Colonne datetime
+                elif pd.api.types.is_datetime64_any_dtype(df[column]):
+                    df[column].interpolate(method='linear', inplace=True)
+        
+        print(f"Completed dataset {i+1}")
+
+def encode_time_features(df, start_col="interval_start", end_col="interval_end"):
+    df = df.copy()
+    
+    # Step 1: Ensure datetime columns are in the correct format first
+    df[start_col] = pd.to_datetime(df[start_col], utc=True, format="mixed")
+    df[end_col] = pd.to_datetime(df[end_col], utc=True, format="mixed")
+
+    # Step 2: Extract 'month' and 'day' after conversion
+    df['month'] = df[start_col].dt.month
+    df['day'] = df[start_col].dt.dayofweek # Note: dayofweek is typically used for cyclical weekly patterns
+    
+    # Step 3: Now you can create the cyclical features
+    df['month_sin'] = np.sin(2 * np.pi * df['month']/len(df['month'].unique()))
+    df['month_cos'] = np.cos(2 * np.pi * df['month']/len(df['month'].unique()))
+    df['day_sin'] = np.sin(2 * np.pi * df['day']/len(df['day'].unique()))
+    df['day_cos'] = np.cos(2 * np.pi * df['day']/len(df['day'].unique()))
+
+
+    # Ora del giorno (0-23) → ciclo giornaliero
+    df["hour"] = df[start_col].dt.hour
+    angle_day_start = 2 * np.pi * df["hour"] / 24
+    df["start_time_sin"] = np.sin(angle_day_start)
+    df["start_time_cos"] = np.cos(angle_day_start)
+
+    df["hour_end"] = df[end_col].dt.hour
+    angle_day_end = 2 * np.pi * df["hour_end"] / 24
+    df["end_time_sin"] = np.sin(angle_day_end)
+    df["end_time_cos"] = np.cos(angle_day_end)
+
+    # Durata in minuti
+    df["duration_minutes"] = (df[end_col] - df[start_col]).dt.total_seconds() / 60
+
+    # Giorno della settimana (0=Mon..6=Sun) → ciclo settimanale
+    dayofweek = df[start_col].dt.dayofweek
+    angle_week = 2 * np.pi * dayofweek / 7
+    df["dow_sin"] = np.sin(angle_week)
+    df["dow_cos"] = np.cos(angle_week)
+
+    # Giorno dell’anno (1-365) → ciclo annuale
+    dayofyear = df[start_col].dt.dayofyear
+    angle_year = 2 * np.pi * dayofyear / 365
+    df["doy_sin"] = np.sin(angle_year)
+    df["doy_cos"] = np.cos(angle_year)
+
+    # Rimuovo colonne temporali e variabili ausiliarie
+    df = df.drop(columns=[start_col, end_col, "hour", "hour_end", "day", "month"])
+    return df
 
 def series_to_2d_array(series, output_dim=24):
     arr = np.stack(series.apply(lambda x: np.array(x, dtype=np.float32)))
@@ -28,74 +101,76 @@ def series_to_2d_array(series, output_dim=24):
         raise ValueError(f"Ogni elemento deve avere {output_dim} valori, trovato {arr.shape[1]}")
     return arr
 
-if __name__ == "__main__":
-    # Dati METRO
-    path = "./data"
-    files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith('.csv')]
+def is_useful_series(series, zero_ratio_thr=0.85, var_thr=1e-1, unique_thr=3):
+    arr = np.array(series, dtype=float)
+    
+    # Varianza
+    if np.var(arr) <= var_thr:
+        return False
+    
+    # Percentuale di zeri
+    zero_ratio = (arr == 0).mean()
+    if zero_ratio >= zero_ratio_thr:
+        return False
+    
+    # Numero valori distinti
+    if len(np.unique(arr)) <= unique_thr:
+        return False
+    
+    return True
 
-    selected_file = []
-    var = "averageSpeed"
-    for file in files:
-        if var in file:
-            selected_file.append(file)
-    #print(f"Selected file: {selected_file}")
+if __name__ == "__main__":
+    to_keep = ['type_of_TTT', 'min', 'longitude', 'var', 'median', 'interval_end', 
+            'is_festive', 'mean', 'max', 'metric', 'interval_start', 'linear_trend',
+            'is_weekend', 'latitude', 'city', 'nature','month', 'avg_variation', 
+            'TTT','address','day', 'province']
+
+    path = "../data"
+    files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith('.xlsx')]
 
     # Caricamento dati
-    selezionati = [p for p in selected_file if re.search(r'METRO.+desc\.csv', p)]
-    print (selezionati)
-    dati = [pd.read_csv(path+'/'+p) for p in selezionati]
-    dtset_completo = pd.concat(dati, ignore_index=True)
+    selezionati = [p for p in files if not re.search(r'tusc|df', p) and re.search(r'METRO',p) and p.endswith('.xlsx')]
+    #print(f"File selezionati: {selezionati}")
+    dati = [pd.read_excel(path+'/'+p, usecols=to_keep) for p in selezionati]
+    
+    # Interpolazione intelligente
+    smart_interpolation(dati)
+
+    # Concatenazione
+    df_completo = pd.concat(dati, ignore_index=True)
     #print(dtset_completo.shape)
 
-    # Preprocessing
-    dtset_completo['TTT'] = dtset_completo['TTT'].apply(ast.literal_eval)
-        # Filtra le righe dove la colonna TTT ha lunghezza 24
-    dtset_filtrato = dtset_completo[dtset_completo["TTT"].apply(lambda x: len(x) == 24)].sample(frac=1).reset_index(drop=True)
+    # Filtra righe che non contengono "nan"
+    mask = ~df_completo['TTT'].str.contains("nan", na=False)
+    df_completo = df_completo[mask]
 
-    cols_with_nan = dtset_filtrato.columns[dtset_filtrato.isna().any()]
-    dtset_filtrato = dtset_filtrato.drop(columns=cols_with_nan)
+    # Preprocessing
+    df_completo['TTT'] = df_completo['TTT'].apply(ast.literal_eval)
+    # Filtra le righe dove la colonna TTT ha lunghezza 24
+    dtset_filtrato = df_completo[df_completo["TTT"].apply(lambda x: len(x) == 24)].sample(frac=1).reset_index(drop=True)
+    dtset_filtrato = dtset_filtrato[dtset_filtrato["type_of_TTT"] == "daily"]
+    dtset_filtrato = dtset_filtrato.drop(columns=["type_of_TTT"])
+
+
+    mask_useful = dtset_filtrato["TTT"].apply(is_useful_series)
+    df_useful = dtset_filtrato[mask_useful]
 
     categorical = [
-    'serviceType', 'typeLabel',
-    'subnature', 'nature', 'is_weekend',
-    'is_festive', 'day', 'month', 'type_of_TTT', 'metric', 'geometry_type', 'highway'
+    'address','city','nature', 'is_weekend',
+    'is_festive', 'metric', 'province'
     ]
+
+    #print(f'useful columns: {df_useful.columns.tolist()}')
     #consiglio, per serie cicliche usare funzioni periodiche tipo seno coseno 
-    df_encoded = pd.get_dummies(dtset_filtrato
+    df_encoded = pd.get_dummies(df_useful
                                 , columns=categorical)
 
-    to_drop = [
-        'address',
-        'brokerName', 'organization',
-        'linkDBpedia', 'serviceUri', 'photoOrigs',
-        'photoThumbs', 'photos', 'model', 'producer',
-        'name', 'format', 'comments', 'protocol'
-    ]
+    df_final = encode_time_features(df_encoded)
 
-    df_clean = df_encoded.drop(columns=to_drop)
-
-    df_clean.head()
-
-    # Calcolo della differenza in minuti dall’inizio del giorno
-    period_minutes = 1440
-
-    df_clean["interval_start"] = pd.to_datetime(df_clean["interval_start"])
-    df_clean["interval_end"] = pd.to_datetime(df_clean["interval_end"])
-
-    # Aggiungo codifica per `interval_start`
-    df_final = df_clean.assign(**encode_timestamp_minute_cyclic(df_clean["interval_start"], "start_time"))
-
-    # Aggiungo codifica per `interval_end`
-    df_final = df_clean.assign(**encode_timestamp_minute_cyclic(df_clean["interval_end"], "end_time"))
-
-    df_final["duration_minutes"] = (df_final["interval_end"] - df_final["interval_start"]).dt.total_seconds() / 60
-
-    df_final = df_final.drop(columns=["interval_start", "interval_end"])
-
-    df_final.head()
 
     # Separazione delle feature e del target
     X = df_final.drop(columns=['TTT'])
+    print(X.head())
     y = df_final['TTT']
 
 
@@ -111,7 +186,7 @@ if __name__ == "__main__":
 
 
     # Creo bin basati sui quantili
-    bins = np.quantile(std_scores_normalized, [0.2, 0.4, 0.6, 0.8])
+    bins = np.array([0.0, 0.4, 0.8, 1.0])
     std_bins = np.digitize(std_scores_normalized, bins)
     #print(f"bins :", std_bins)
 
@@ -171,7 +246,7 @@ if __name__ == "__main__":
     evo = Evolution(space, elitism=0, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.35)
 
     # Popolazione iniziale
-    pop_size = 24
+    pop_size = 12
     population = [space.sample() for _ in range(pop_size)]
     pop_decrease = 1
 

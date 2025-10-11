@@ -10,17 +10,17 @@ from tensorflow.keras.backend import clear_session # type: ignore
 from Model_tf import TFModelInstantiator
 
 def regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    mae = mean_absolute_error(y_true, y_pred, multioutput="uniform_average")
+    rmse = mean_squared_error(y_true, y_pred, multioutput="uniform_average")
     mask = y_true != 0
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = mean_squared_error(y_true, y_pred)
     mape = float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100.0)
-    r2 = r2_score(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred, multioutput="variance_weighted")
     return {"MAE": float(mae), "RMSE": float(rmse), "MAPE": float(mape), "R2": float(r2)}
 
 
 class CrossValuation:
     def __init__(self, model_instantiator, X: np.ndarray, y: np.ndarray, iter: int = 3, k: int = 3, seed: int = 42):
-        assert X.shape[1] == 42 and y.shape[1] == 24, "X shape (N, D), y shape (N,)"
+        assert y.shape[1] == 24, "X shape (N, D), y shape (N,)"
         self.inst = model_instantiator
         self.X, self.y = X.astype(np.float32), y.astype(np.float32)
         self.k = k
