@@ -37,9 +37,10 @@ class Evolution:
         if weights is None:
             weights = {
                 "R2": 0.4,
-                "RMSE": 0.3,
+                "MAE": 0.3,
+                "RMSE": 0.2,
                 "MAPE": 0.2,
-                "Train_Time": 0.1
+                "Train_Time": 0.5
             }
 
         def inv_cost(x: float) -> float:
@@ -98,6 +99,23 @@ class Evolution:
 
     # ---- crossover ----
     def _crossover(self, p1: Dict, p2: Dict) -> Dict:
+    # Prima del crossover, normalizza le liste di dropout per entrambi i genitori
+        for parent in [p1, p2]:
+            hidden_len = len(parent['architecture'])
+            dropout_len = len(parent['dropout'])
+            
+            if dropout_len < hidden_len:
+                # Estrai nuovi valori dropout casuali dalla lista dello spazio
+                additional_dropouts = [
+                    random.choice(self.hyper_space.space['dropout'][1])
+                    for _ in range(hidden_len - dropout_len)
+                ]
+                parent['dropout'] = parent['dropout'] + additional_dropouts
+            elif dropout_len > hidden_len:
+                # Tronca la lista dropout alla lunghezza di hidden_units
+                parent['dropout'] = parent['dropout'][:hidden_len]
+        
+        # Ora procedi con il crossover normale
         if self.crossover_type == "uniform":
             return {k: random.choice([p1[k], p2[k]]) for k in p1.keys()}
         elif self.crossover_type == "single_point":

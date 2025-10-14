@@ -10,45 +10,27 @@ class HyperparameterSpace:
         self.space = {
             "learning_rate": ("continuous", 1e-4, 1e-1),  
             "architecture": ("categorical", [
-                # Architetture leggere (1-2 layers)
-                [32],
-                [64],
-                [128],
-                [256],
-                
-                [32, 32],
-                [64, 64],
-                [128, 128],
-                [256, 256],
-
-                #aarchitetture medie (2 layers)
-                [64, 32],
-                [128, 64],
-                [256, 128],
-
                 # Architetture moderate (3 layers)
                 [128, 64, 32],
-                [256, 128, 64],
-                [512, 256, 128],
+                [64, 48, 36],
                 
-                # Architetture a "bottleneck"
-                [256, 64, 256],
-                [128, 32, 128],
-                
-                # Architetture crescenti
-                [32, 64, 128],
-                [64, 128, 256],
+                # Architetture crescenti (3 layers)
+                [24, 48, 96],
 
-                #architetture a 4 layer "bottlenek"
-                [256, 64, 64, 256],
-                [128, 32, 32, 128]
+                # Architetture profonde (4 layers)
+                [96, 64, 48, 32],
+                [84, 56, 42, 32],
+
+                # Architetture crescenti
+                [32, 48, 64, 80],
+                [28, 42, 64, 96, 72],
             ]), 
             "activation": ("categorical", ["relu"]),
             "batch_size": ("discrete", [16,32,64,128]), 
-            "dropout": ("discrete", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]), 
-            "optimizer": ("categorical", ["sgd"]),
+            "dropout": ("discrete", [0.0, 0.2, 0.3, 0.4]), 
+            "optimizer": ("categorical", ["adamw"]),
             "weight_decay": ("continuous", 1e-5, 1e-2),
-            "early_stop_patience": ("discrete", [10, 15, 20]), 
+            "early_stop_patience": ("discrete", [15]), 
             "epochs": ("discrete", [300, 400, 500, 600])
             }
 
@@ -115,7 +97,12 @@ class HyperparameterSpace:
                 self._sample_continuous_param(key, spec, params)
                 
             elif ptype == "discrete":
-                params[key] = random.choice(spec[1])
+                if key == "dropout":
+                    params[key] = []
+                    for _ in range(len(params['architecture'])):
+                        params[key].append(random.choice(spec[1]))
+                else:
+                    params[key] = random.choice(spec[1])
                 
             elif ptype == "categorical":
                 params[key] = random.choice(spec[1])
@@ -124,21 +111,46 @@ class HyperparameterSpace:
 
     def mutate(self, params: Dict, mutation_rate: float = 0.2) -> Dict:
         newp = dict(params)
+        
+        # Prima normalizza la lista dropout se necessario
+        if len(newp["architecture"]) != len(newp["dropout"]):
+            hidden_len = len(newp['architecture'])
+            dropout_len = len(newp['dropout'])
+            
+            if dropout_len < hidden_len:
+                dropout_options = self.space['dropout'][1]
+                additional_dropouts = [
+                    random.choice(dropout_options)
+                    for _ in range(hidden_len - dropout_len)
+                ]
+                newp['dropout'] = newp['dropout'] + additional_dropouts
+            elif dropout_len > hidden_len:
+                newp['dropout'] = newp['dropout'][:hidden_len]
+        
+        # Applica le mutazioni
         for name, spec in self.space.items():
-            if random.random() < mutation_rate:
-                ptype = spec[0]
+            ptype = spec[0]
 
-                if ptype == "continuous":
+            if ptype == "continuous":
+                if random.random() < mutation_rate:
                     lo, hi = spec[1], spec[2]
                     factor = random.uniform(0.5, 1.5)
                     val = np.clip(newp[name] * factor, lo, hi)
                     val = Decimal(val)
                     newp[name] = float(val.quantize(Decimal('0.0001'), rounding=ROUND_DOWN))
 
-                elif ptype == "discrete":
+            elif ptype == "discrete":
+                if name == "dropout":
+                    # Mutazione elemento per elemento della lista dropout
+                    for i in range(len(newp[name])):
+                        if random.random() < mutation_rate:
+                            newp[name][i] = random.choice(spec[1])
+                else:
+                    if random.random() < mutation_rate:
                         newp[name] = random.choice(spec[1])
 
-                elif ptype == "categorical":
+            elif ptype == "categorical":
+                if random.random() < mutation_rate:
                     newp[name] = random.choice(spec[1])
-
+        
         return newp

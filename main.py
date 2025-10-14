@@ -122,14 +122,15 @@ def is_useful_series(series, zero_ratio_thr=0.85, var_thr=1e-1, unique_thr=3):
 if __name__ == "__main__":
     to_keep = ['type_of_TTT', 'min', 'longitude', 'var', 'median', 'interval_end', 
             'is_festive', 'mean', 'max', 'metric', 'interval_start', 'linear_trend',
-            'is_weekend', 'latitude', 'city', 'nature','month', 'avg_variation', 
-            'TTT','address','day', 'province']
+            'is_weekend', 'latitude', 'nature','month', 'avg_variation', 
+            'TTT','day', 'address', 'city', 'province'
+            ]
 
     path = "../data"
     files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith('.xlsx')]
 
     # Caricamento dati
-    selezionati = [p for p in files if not re.search(r'tusc|df', p) and re.search(r'METRO',p) and p.endswith('.xlsx')]
+    selezionati = [p for p in files if not re.search(r'df',p) and re.search(r'.xlsx',p)]
     #print(f"File selezionati: {selezionati}")
     dati = [pd.read_excel(path+'/'+p, usecols=to_keep) for p in selezionati]
     
@@ -156,8 +157,8 @@ if __name__ == "__main__":
     df_useful = dtset_filtrato[mask_useful]
 
     categorical = [
-    'address','city','nature', 'is_weekend',
-    'is_festive', 'metric', 'province'
+    'nature', 'is_weekend',
+    'is_festive', 'metric', 'address', 'city', 'province'
     ]
 
     #print(f'useful columns: {df_useful.columns.tolist()}')
@@ -166,6 +167,7 @@ if __name__ == "__main__":
                                 , columns=categorical)
 
     df_final = encode_time_features(df_encoded)
+    
 
 
     # Separazione delle feature e del target
@@ -190,49 +192,31 @@ if __name__ == "__main__":
     std_bins = np.digitize(std_scores_normalized, bins)
     #print(f"bins :", std_bins)
 
-    # Primo split: train (80%) vs temp (20%)
+
     # Passo anche std_bins per poter stratificare
-    X_train, X_temp, y_train, y_temp, bins_train_temp, bins_temp = train_test_split(
-        X_np, y_np, std_bins,
-        test_size=0.2,
+    X_train, X_test, y_train, y_test= train_test_split(
+        X_np, y_np,
+        test_size=0.25,
         random_state=42,
         stratify=std_bins,
         shuffle=True
     )
 
-    # bins_temp è il sottoinsieme di std_bins corrispondente a X_temp/y_temp
-    # Secondo split: divido temp in val/test (50%-50% del temp)
-    X_val, X_test, y_val, y_test = train_test_split(
-        X_temp, y_temp,
-        test_size=0.5,
-        random_state=42,
-        stratify=bins_temp,  # usa i bin corrispondenti al sottoinsieme
-        shuffle=True
-    )
-
-    print(f"Train size: {X_train.shape}, {y_train.shape}")
-    print(f"Validation size: {X_val.shape}, {y_val.shape}")
-    print(f"Test size: {X_test.shape}, {y_test.shape}")
-
     # Debug prints
-    print(f"Final shapes:")
-    print(f"X_train: {X_train.shape}")
-    print(f"X_val: {X_val.shape}")
-    print(f"y_train: {y_train.shape}")
+    print(f"Train size: {X_train.shape}, {y_train.shape}")
+    print(f"Test size: {X_test.shape}, {y_test.shape}")
 
     # Scaler per input
     scaler_X = MinMaxScaler()
     X_train = scaler_X.fit_transform(X_train)
-    X_val = scaler_X.fit_transform(X_val)
     X_test  = scaler_X.transform(X_test)
 
     # Scaler per output (se serve normalizzare anche y)
     scaler_y = MinMaxScaler()
     y_train = scaler_y.fit_transform(y_train)
-    y_val = scaler_y.fit_transform(y_val)
     y_test  = scaler_y.transform(y_test)
 
-    print(f"y_test: {y_train.shape}, y_val: {y_val.shape}, y_train: {y_test.shape}")
+    print(f"y_test: {y_train.shape}, y_train: {y_test.shape}")
     
     # Debug prints
     print("After normalization:")
@@ -243,25 +227,24 @@ if __name__ == "__main__":
     space = HyperparameterSpace()
     factory = TFModelInstantiator()
     valuation = CrossValuation(factory, X_train, y_train, iter= 5, k = 3)
-    evo = Evolution(space, elitism=0, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.35)
+    evo = Evolution(space, elitism=1, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.45)
 
     # Popolazione iniziale
-    pop_size = 12
+    pop_size = 2
     population = [space.sample() for _ in range(pop_size)]
-    pop_decrease = 1
+    pop_decrease = 3
 
     # Ciclo evolutivo 
-    generations = 4
+    generations = 3
     for gen in range(generations):
         print(f"------------------------------generation n: {gen}-----------------------------------\n")
         results = valuation.evaluate(population)
 
-        if evo.early_stop_criteria(patience=3, tolerance= 5e-4):
+        if evo.early_stop_criteria(patience=2, tolerance= 5e-3):
             break
         
-        if ((gen)%(pop_decrease)) == 0:
+        if (((gen)%(pop_decrease)) == 0) and (gen != 0) and (pop_size > 4):
             pop_size //= 2
-            pop_decrease *= 2
             print(f"---------------------population decreased at {pop_size}, next decrease in {pop_decrease - gen}")
 
         population = evo.evolve(results, pop_size=pop_size, max_generations=generations)
@@ -283,7 +266,7 @@ if __name__ == "__main__":
     model = factory.create_model(best_of_all(evo.history), input_dim, output_dim)
 
     # Allena il modello
-    model.train(X_train, y_train, X_val, y_val)
+    model.train(X_train, y_train)
 
     # Predizioni
     y_pred = model.predict(X_test)

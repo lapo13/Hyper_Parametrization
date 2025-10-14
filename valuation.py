@@ -53,7 +53,7 @@ class CrossValuation:
             for _ in range(self.iter):
                 
                 # Stratified K-Fold
-                kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+                kf = StratifiedKFold(n_splits= self.k, shuffle=True, random_state=42)
 
                 for tr_idx, te_idx in kf.split(self.X, std_bins):
                     Xtr, Xte = self.X[tr_idx], self.X[te_idx]

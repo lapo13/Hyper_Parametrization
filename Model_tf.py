@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras # type: ignore
 from tensorflow.keras import layers, optimizers # type: ignore
-from typing import Dict, List
+from typing import Dict, List, Optional
 from tensorflow.keras.callbacks import EarlyStopping # type: ignore
 
 
@@ -43,19 +43,19 @@ class TFModel:
         activation = self.params.get("activation", "relu").lower()
         if activation == "none":
             activation = None
-        dropout = float(self.params.get("dropout", 0))
+        dropout: List[float] = (self.params.get("dropout", [0.0]))
 
         inputs = keras.Input(shape=(input_dim,))
         x = inputs
         if hidden_units == []:
             raise ValueError("La lista dei neuroni è vuota! Controlla la configurazione.")
 
-        for units in hidden_units:
+        for i, units in enumerate(hidden_units):
             x = layers.Dense(units, activation=activation)(x)
-            if dropout > 0:
-                x = layers.Dropout(dropout)(x)
+            if i < len(dropout):
+                x = layers.Dropout(dropout[i])(x)
 
-        outputs = layers.Dense(output_dim)(x)
+        outputs = layers.Dense(output_dim, activation='linear')(x)
         self.model = keras.Model(inputs, outputs)
 
     def get_weights(self):
@@ -66,7 +66,7 @@ class TFModel:
         if self.model:
             return self.model.set_weights(weights) 
         
-    def train(self, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray):
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None, split_val: float = 0.2):
         assert self.model is not None, "Call build() first"
 
         # Parametri
@@ -85,7 +85,7 @@ class TFModel:
             optimizer = optimizers.Adam(learning_rate=lr)
 
 
-        self.model.compile(optimizer=optimizer, loss= 'mae', metrics=["mae", "mape"])
+        self.model.compile(optimizer=optimizer, loss= 'mae', metrics=["mae", "mse"])
 
         with tf.device(self.device):
             # Callback early stopping
@@ -96,15 +96,25 @@ class TFModel:
                 verbose=1
             )
 
-            # Training
-            hist = self.model.fit(
+            if X_val is None or y_val is None:
+                hist = self.model.fit(
                 X_train, y_train,
-                validation_data=(X_val, y_val),
+                validation_split=split_val,
                 batch_size=batch_size,
                 epochs=epochs,
                 verbose=1,
                 shuffle=True,
                 callbacks=[early_stop])
+            # Training
+            else:
+                hist = self.model.fit(
+                    X_train, y_train,
+                    validation_data=(X_val, y_val),
+                    batch_size=batch_size,
+                    epochs=epochs,
+                    verbose=1,
+                    shuffle=True,
+                    callbacks=[early_stop])
             
 
             # Accesso alle loss
