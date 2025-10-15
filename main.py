@@ -101,29 +101,31 @@ def series_to_2d_array(series, output_dim=24):
         raise ValueError(f"Ogni elemento deve avere {output_dim} valori, trovato {arr.shape[1]}")
     return arr
 
-def is_useful_series(series, zero_ratio_thr=0.85, var_thr=1e-1, unique_thr=3):
+def is_useful_series(series, zero_ratio_thr=0.85, min_nonzero_value=0.1):
     arr = np.array(series, dtype=float)
     
-    # Varianza
-    if np.var(arr) <= var_thr:
+    # Serie troppo corta
+    if len(arr) <= 1:
         return False
     
-    # Percentuale di zeri
+    # Troppi zeri
     zero_ratio = (arr == 0).mean()
     if zero_ratio >= zero_ratio_thr:
         return False
     
-    # Numero valori distinti
-    if len(np.unique(arr)) <= unique_thr:
+    # Valore medio trascurabile (quasi zero)
+    mean_val = np.mean(arr)
+    if abs(mean_val) < min_nonzero_value:
         return False
     
+    # Se arriva qui, la serie ha valori significativi
     return True
 
 if __name__ == "__main__":
     to_keep = ['type_of_TTT', 'min', 'longitude', 'var', 'median', 'interval_end', 
             'is_festive', 'mean', 'max', 'metric', 'interval_start', 'linear_trend',
             'is_weekend', 'latitude', 'nature','month', 'avg_variation', 
-            'TTT','day', 'address', 'city', 'province'
+            'TTT','day'#, 'address', 'city', 'province'
             ]
 
     path = "../data"
@@ -158,7 +160,7 @@ if __name__ == "__main__":
 
     categorical = [
     'nature', 'is_weekend',
-    'is_festive', 'metric', 'address', 'city', 'province'
+    'is_festive', 'metric'#, 'address', 'city', 'province'
     ]
 
     #print(f'useful columns: {df_useful.columns.tolist()}')
@@ -211,7 +213,7 @@ if __name__ == "__main__":
     X_train = scaler_X.fit_transform(X_train)
     X_test  = scaler_X.transform(X_test)
 
-    # Scaler per output (se serve normalizzare anche y)
+    # Scaler per output
     scaler_y = MinMaxScaler()
     y_train = scaler_y.fit_transform(y_train)
     y_test  = scaler_y.transform(y_test)
@@ -226,27 +228,32 @@ if __name__ == "__main__":
     # Componenti
     space = HyperparameterSpace()
     factory = TFModelInstantiator()
-    valuation = CrossValuation(factory, X_train, y_train, iter= 5, k = 3)
-    evo = Evolution(space, elitism=1, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.45)
+    valuation = CrossValuation(factory, X_train, y_train, iter= 5, k = 4)
+    evo = Evolution(space, elitism=1, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.15)
 
     # Popolazione iniziale
-    pop_size = 2
+    pop_size = 300
     population = [space.sample() for _ in range(pop_size)]
-    pop_decrease = 3
+
+    MIN_POP_SIZE = 4
+    REDUCTION_FACTOR = 0.67  # riduzione a 2/3
+    BASE_INTERVAL = 2
 
     # Ciclo evolutivo 
-    generations = 3
+    generations = 25
     for gen in range(generations):
         print(f"------------------------------generation n: {gen}-----------------------------------\n")
-        results = valuation.evaluate(population)
+        if (gen % BASE_INTERVAL == 0) and (gen != 0) and (pop_size > MIN_POP_SIZE):
+            new_pop_size = max(MIN_POP_SIZE, int(pop_size * REDUCTION_FACTOR))
+            
+            if new_pop_size < pop_size:
+                pop_size = new_pop_size
+                print(f"--------------------- Population decreased to {pop_size} at generation {gen}")
 
-        if evo.early_stop_criteria(patience=2, tolerance= 5e-3):
+        results = valuation.evaluate(population, gen=gen, higher_bound=30, lower_bound=6)
+        if evo.early_stop_criteria(patience=4, tolerance= 5e-3):
             break
         
-        if (((gen)%(pop_decrease)) == 0) and (gen != 0) and (pop_size > 4):
-            pop_size //= 2
-            print(f"---------------------population decreased at {pop_size}, next decrease in {pop_decrease - gen}")
-
         population = evo.evolve(results, pop_size=pop_size, max_generations=generations)
         time.sleep(3) 
 

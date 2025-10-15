@@ -164,7 +164,7 @@ class Evolution:
         
 
     # ---- evolve ----
-    def evolve(self, results: List[Tuple[Dict, Dict, Dict]], pop_size: int, max_generations: int = 50) -> List[Dict]:
+    def evolve(self, results: List[Tuple[Dict, Dict, Dict]],  pop_size: int, max_generations: int = 50) -> List[Dict]:
         self.generation += 1
         mut_rate = self._adaptive_mut_rate(max_generations)
 

@@ -29,9 +29,9 @@ class HyperparameterSpace:
             "batch_size": ("discrete", [16,32,64,128]), 
             "dropout": ("discrete", [0.0, 0.2, 0.3, 0.4]), 
             "optimizer": ("categorical", ["adamw"]),
-            "weight_decay": ("continuous", 1e-5, 1e-2),
+            "weight_decay": ("continuous", 1e-4, 1e-2),
             "early_stop_patience": ("discrete", [15]), 
-            "epochs": ("discrete", [300, 400, 500, 600])
+            "epochs": ("discrete", [400])
             }
 
     def _hash_params(self, params: Dict) -> Tuple[Tuple[str, object], ...]:
