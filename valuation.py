@@ -3,6 +3,9 @@ import time
 
 from typing import List, Dict, Tuple
 
+#Le eccezioni sono state gestite per evitare crash in casi in cui il modello produce NaN o altre anomalie,
+#la gestione assegna valori pessimi alle metriche in modo che tali modelli vengano penalizzati nella selezione evolutiva.
+
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from tensorflow.keras.backend import clear_session # type: ignore
@@ -29,7 +32,6 @@ class CrossValuation:
         self.iter = iter
 
     def evaluate(self, params_list: List[Dict], gen: int, higher_bound: int = 40, lower_bound: int = 8) -> List[Tuple[Dict, Dict, Dict]]:
-        results: List[Tuple[Dict, Dict, Dict]] = []
         n_models = len(params_list)
         
         # Strategia di valutazione basata sulla dimensione della popolazione
@@ -37,7 +39,7 @@ class CrossValuation:
             # Popolazione grande: usa train/test split semplice
             evaluation_method = self._evaluate_train_test_split
             print(f"Gen {gen}: {n_models} modelli - usando Train/Test Split")
-        elif n_models >= lower_bound:
+        elif n_models > lower_bound:
             # Popolazione media: usa K-Fold classico
             evaluation_method = self._evaluate_kfold
             print(f"Gen {gen}: {n_models} modelli - usando K-Fold classico")
@@ -64,17 +66,19 @@ class CrossValuation:
             print(f"Modello {i+1}/{len(params_list)} - Train/Test Split")
             
             model = self.inst.create_model(params, input_dim=self.input_dim, output_dim=self.output_dim)
-            
-            start_time = time.perf_counter()
-            model.train(X_train, y_train, X_test, y_test)
-            end_time = time.perf_counter()
-            
-            preds = model.predict(X_test)
-            train_time = end_time - start_time
-            
-            metrics = regression_metrics(y_test, preds)
-            metrics["Train_Time"] = train_time
-            
+            try:
+                start_time = time.perf_counter()
+                model.train(X_train, y_train, X_test, y_test)
+                end_time = time.perf_counter()
+                
+                preds = model.predict(X_test)
+                train_time = end_time - start_time
+                
+                metrics = regression_metrics(y_test, preds)
+                metrics["Train_Time"] = train_time
+            except Exception as e:
+                print(f"Errore durante l'addestramento o la previsione del modello {i+1}: {e}")
+                metrics = {"MAE": float('inf'), "RMSE": float('inf'), "MAPE": float('inf'), "R2": float('-inf'), "Train_Time": float('inf')}
             # Per train/test split, STD = 0 per tutte le metriche
             std_metrics = {f"{k}_STD": 0.0 for k in metrics.keys()}
             
@@ -104,18 +108,23 @@ class CrossValuation:
             model = self.inst.create_model(params, input_dim=self.input_dim, output_dim=self.output_dim)
             initial_weights = model.get_weights()
             
-            for fold, (tr_idx, te_idx) in enumerate(kf.split(self.X, std_bins)):
+            for (tr_idx, te_idx) in kf.split(self.X, std_bins):
                 Xtr, Xte = self.X[tr_idx], self.X[te_idx]
                 ytr, yte = self.y[tr_idx], self.y[te_idx]
                 
-                start_time = time.perf_counter()
-                model.train(Xtr, ytr, Xte, yte)
-                end_time = time.perf_counter()
-                
-                preds = model.predict(Xte)
-                train_time = end_time - start_time
-                
-                metrics = regression_metrics(yte, preds)
+                try:
+                    start_time = time.perf_counter()
+                    model.train(Xtr, ytr, Xte, yte)
+                    end_time = time.perf_counter()
+                    
+                    preds = model.predict(Xte)
+                    train_time = end_time - start_time
+                    
+                    metrics = regression_metrics(yte, preds)
+                except Exception as e:
+                    print(f"Errore durante l'addestramento o la previsione del modello {i+1} nel fold: {e}")
+                    metrics = {"MAE": float('inf'), "RMSE": float('inf'), "MAPE": float('inf'), "R2": float('-inf')}
+                    train_time = float('inf')
                 metrics["Train_Time"] = train_time
                 fold_metrics.append(metrics)
                 
@@ -161,15 +170,19 @@ class CrossValuation:
                     Xtr, Xte = self.X[tr_idx], self.X[te_idx]
                     ytr, yte = self.y[tr_idx], self.y[te_idx]
                     
-                    start_time = time.perf_counter()
-                    model.train(Xtr, ytr, Xte, yte)
-                    end_time = time.perf_counter()
-                    
-                    preds = model.predict(Xte)
-                    train_time = end_time - start_time
-                    
-                    metrics = regression_metrics(yte, preds)
-                    metrics["Train_Time"] = train_time
+                    try:
+                        start_time = time.perf_counter()
+                        model.train(Xtr, ytr, Xte, yte)
+                        end_time = time.perf_counter()
+                        
+                        preds = model.predict(Xte)
+                        train_time = end_time - start_time
+                        
+                        metrics = regression_metrics(yte, preds)
+                        metrics["Train_Time"] = train_time
+                    except Exception as e:
+                        print(f"Errore durante l'addestramento o la previsione del modello {i+1} nel fold iterativo: {e}")
+                        metrics = {"MAE": float('inf'), "RMSE": float('inf'), "MAPE": float('inf'), "R2": float('-inf'), "Train_Time": float('inf')}
                     fold_metrics.append(metrics)
                     
                     if isinstance(self.inst, TFModelInstantiator):

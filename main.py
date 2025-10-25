@@ -1,9 +1,7 @@
 import pandas as pd
-import os
-import re
-import ast
+import os, re, ast, time
+from typing import Dict, Optional
 import numpy as np
-import time
 import matplotlib.pyplot as plt
 
 from Hyper_Space import HyperparameterSpace
@@ -12,7 +10,40 @@ from Model_tf import TFModelInstantiator
 from valuation import CrossValuation, regression_metrics
 from Evolution import Evolution
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import RobustScaler
+
+def normalize_metrics(
+                metrics_mean: Dict[str, float],
+                weights: Optional[Dict[str, float]] = None
+            ) -> float:
+        
+        if weights is None:
+            weights = {
+                "R2": 0.3,
+                "MAE": 0.2,
+                "RMSE": 0.2,
+                "MAPE": 0.3,
+            }
+
+        def _inv_cost(x: float) -> float:
+            return 1.0 / (1.0 + x)
+
+        performance_score = 0.0
+        for key, w in weights.items():
+            if key not in metrics_mean:
+                raise KeyError(f"Metrica media mancante: '{key}'")
+
+            v = float(metrics_mean[key])
+
+            if key == "R2":
+                contrib = w * max(0.0, v)
+            
+            else: # Errori (RMSE, MAPE)
+                contrib = w * _inv_cost(v)
+
+            performance_score += contrib
+
+        return float(performance_score)
 
 def smart_interpolation(df_list):
     for i, df in enumerate(df_list):
@@ -27,10 +58,10 @@ def smart_interpolation(df_list):
                 if pd.api.types.is_numeric_dtype(df[column]):
                     # Se pochi missing values, interpolazione
                     if missing_count / len(df) < 0.1:  # meno del 10%
-                        df[column].interpolate(method='linear', inplace=True)
+                        df[column] = df[column].interpolate(method='linear')
                     else:
                         # Se molti missing, usa la media
-                        df[column].fillna(df[column].mean(), inplace=True)
+                        df[column] = df[column].fillna(df[column].mean())
                 
                 # Colonne stringa/categoriche
                 elif pd.api.types.is_string_dtype(df[column]) or pd.api.types.is_object_dtype(df[column]):
@@ -46,6 +77,78 @@ def smart_interpolation(df_list):
                     df[column].interpolate(method='linear', inplace=True)
         
         print(f"Completed dataset {i+1}")
+
+def spezza_serie_in_colonne(df, colonna_stringa, prefix='col_'):
+# Verifica che la colonna esista
+    if colonna_stringa not in df.columns:
+        raise ValueError(f"La colonna '{colonna_stringa}' non esiste nel DataFrame")
+    
+    # Crea una copia del DataFrame
+    result_df = df.copy()
+    
+    # Rimuove la colonna originale
+    colonna_originale = result_df.pop(colonna_stringa)
+    
+    # Lista per raccogliere tutti gli array convertiti
+    arrays_convertiti = []
+    
+    # Converte ogni stringa in array numerico
+    for stringa in colonna_originale:
+        # Gestione di valori NaN o stringhe vuote
+        if pd.isna(stringa) or stringa == '':
+            arrays_convertiti.append([])
+            continue
+            
+        # Rimuove le parentesi quadre se presenti
+        stringa_pulita = str(stringa).strip('[]')
+        
+        # Divide per spazi multipli e filtra stringhe vuote
+        valori = [x for x in stringa_pulita.split() if x]
+        
+        # Converte in float
+        try:
+            array_numerico = [float(x) for x in valori]
+            arrays_convertiti.append(array_numerico)
+        except ValueError as e:
+            print(f"Errore nella conversione di '{stringa}': {e}")
+            arrays_convertiti.append([])
+    
+    # Trova la lunghezza massima per determinare il numero di colonne
+    lunghezze = [len(arr) for arr in arrays_convertiti]
+    
+    if not lunghezze:
+        raise ValueError("Nessun dato valido trovato nella colonna")
+    
+    lunghezza_max = max(lunghezze)
+    lunghezza_min = min(lunghezze)
+    
+    # Verifica che tutti gli array abbiano la stessa lunghezza
+    if lunghezza_max != lunghezza_min:
+        print(f"Attenzione: array di lunghezze diverse (min: {lunghezza_min}, max: {lunghezza_max})")
+        print("I valori mancanti verranno riempiti con NaN")
+        
+        # Riempie con NaN gli array più corti
+        arrays_completi = []
+        for arr in arrays_convertiti:
+            if len(arr) < lunghezza_max:
+                arr_completo = arr + [np.nan] * (lunghezza_max - len(arr))
+                arrays_completi.append(arr_completo)
+            else:
+                arrays_completi.append(arr)
+    else:
+        arrays_completi = arrays_convertiti
+    
+    # Crea il DataFrame con le nuove colonne
+    nuove_colonne = pd.DataFrame(
+        arrays_completi,
+        index=result_df.index,
+        columns=[f"{prefix}{i}" for i in range(lunghezza_max)]
+    )
+    
+    # Combina con il DataFrame originale
+    result_df = pd.concat([result_df, nuove_colonne], axis=1)
+    
+    return result_df
 
 def encode_time_features(df, start_col="interval_start", end_col="interval_end"):
     df = df.copy()
@@ -122,45 +225,45 @@ def is_useful_series(series, zero_ratio_thr=0.85, min_nonzero_value=0.1):
     return True
 
 if __name__ == "__main__":
-    to_keep = ['type_of_TTT', 'min', 'longitude', 'var', 'median', 'interval_end', 
-            'is_festive', 'mean', 'max', 'metric', 'interval_start', 'linear_trend',
-            'is_weekend', 'latitude', 'nature','month', 'avg_variation', 
-            'TTT','day'#, 'address', 'city', 'province'
+    to_keep = ['type_of_TTT', 'min', 'var', 'median', 'interval_end', 
+            'is_festive', 'mean', 'max', 'interval_start', 'linear_trend',
+            'is_weekend', 'EMBEDDING','month', 'avg_variation', 
+            'TTT','day'
             ]
 
     path = "../data"
-    files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith('.xlsx')]
 
     # Caricamento dati
-    selezionati = [p for p in files if not re.search(r'df',p) and re.search(r'.xlsx',p)]
-    #print(f"File selezionati: {selezionati}")
-    dati = [pd.read_excel(path+'/'+p, usecols=to_keep) for p in selezionati]
-    
-    # Interpolazione intelligente
+    dati = [pd.read_excel(path+'/'+'METRO_with_embeddings.xlsx', usecols=to_keep)]
+
+
+    # Interpolazione intelligente†
     smart_interpolation(dati)
 
     # Concatenazione
     df_completo = pd.concat(dati, ignore_index=True)
-    #print(dtset_completo.shape)
 
     # Filtra righe che non contengono "nan"
     mask = ~df_completo['TTT'].str.contains("nan", na=False)
     df_completo = df_completo[mask]
 
+    
+
     # Preprocessing
     df_completo['TTT'] = df_completo['TTT'].apply(ast.literal_eval)
+    df_completo = spezza_serie_in_colonne(df_completo, 'EMBEDDING', prefix='emb_')
+
     # Filtra le righe dove la colonna TTT ha lunghezza 24
     dtset_filtrato = df_completo[df_completo["TTT"].apply(lambda x: len(x) == 24)].sample(frac=1).reset_index(drop=True)
     dtset_filtrato = dtset_filtrato[dtset_filtrato["type_of_TTT"] == "daily"]
     dtset_filtrato = dtset_filtrato.drop(columns=["type_of_TTT"])
 
-
+    
     mask_useful = dtset_filtrato["TTT"].apply(is_useful_series)
     df_useful = dtset_filtrato[mask_useful]
 
     categorical = [
-    'nature', 'is_weekend',
-    'is_festive', 'metric'#, 'address', 'city', 'province'
+    'is_weekend','is_festive'
     ]
 
     #print(f'useful columns: {df_useful.columns.tolist()}')
@@ -170,6 +273,7 @@ if __name__ == "__main__":
 
     df_final = encode_time_features(df_encoded)
     
+    print(f"Final shape: {df_final.shape}")
 
 
     # Separazione delle feature e del target
@@ -198,7 +302,7 @@ if __name__ == "__main__":
     # Passo anche std_bins per poter stratificare
     X_train, X_test, y_train, y_test= train_test_split(
         X_np, y_np,
-        test_size=0.25,
+        test_size=0.1,
         random_state=42,
         stratify=std_bins,
         shuffle=True
@@ -209,12 +313,12 @@ if __name__ == "__main__":
     print(f"Test size: {X_test.shape}, {y_test.shape}")
 
     # Scaler per input
-    scaler_X = MinMaxScaler()
+    scaler_X = RobustScaler()
     X_train = scaler_X.fit_transform(X_train)
     X_test  = scaler_X.transform(X_test)
 
     # Scaler per output
-    scaler_y = MinMaxScaler()
+    scaler_y = RobustScaler()
     y_train = scaler_y.fit_transform(y_train)
     y_test  = scaler_y.transform(y_test)
 
@@ -228,68 +332,76 @@ if __name__ == "__main__":
     # Componenti
     space = HyperparameterSpace()
     factory = TFModelInstantiator()
-    valuation = CrossValuation(factory, X_train, y_train, iter= 5, k = 4)
-    evo = Evolution(space, elitism=1, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.15)
+    valuation = CrossValuation(factory, X_train, y_train, iter= 3, k = 4)
+    evo = Evolution(space, elitism=1, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.25)
 
     # Popolazione iniziale
-    pop_size = 300
+    pop_size = 256
     population = [space.sample() for _ in range(pop_size)]
 
     MIN_POP_SIZE = 4
-    REDUCTION_FACTOR = 0.67  # riduzione a 2/3
-    BASE_INTERVAL = 2
+    REDUCTION_FACTOR = 0.5  # riduzione 
+    BASE_INTERVAL = 1
+    COUNT = 1
 
     # Ciclo evolutivo 
-    generations = 25
+    generations = 9
     for gen in range(generations):
+        
         print(f"------------------------------generation n: {gen}-----------------------------------\n")
-        if (gen % BASE_INTERVAL == 0) and (gen != 0) and (pop_size > MIN_POP_SIZE):
+        if (COUNT % BASE_INTERVAL == 0) and (gen != 0) and (pop_size > MIN_POP_SIZE):
             new_pop_size = max(MIN_POP_SIZE, int(pop_size * REDUCTION_FACTOR))
             
             if new_pop_size < pop_size:
                 pop_size = new_pop_size
                 print(f"--------------------- Population decreased to {pop_size} at generation {gen}")
 
-        results = valuation.evaluate(population, gen=gen, higher_bound=30, lower_bound=6)
+        results = valuation.evaluate(population, gen=gen, higher_bound=32, lower_bound=8)
         if evo.early_stop_criteria(patience=4, tolerance= 5e-3):
             break
         
         population = evo.evolve(results, pop_size=pop_size, max_generations=generations)
+        COUNT += 1
         time.sleep(3) 
-
 
     print("---------------------------Done.---------------------------------")
 
-    best_of_all = lambda lst: max(lst, key=lambda x: x[1])[0]
-
-    print(f"Params for best performance: {best_of_all(evo.history)}")
-
     print(X_train.shape[1] == X_test.shape[1])
     print(y_train.shape[1] == y_test.shape[1])
-
-    # Crea il modello
     input_dim = X_train.shape[1]
     output_dim = y_train.shape[1]
-    model = factory.create_model(best_of_all(evo.history), input_dim, output_dim)
 
-    # Allena il modello
-    model.train(X_train, y_train)
+    preds = []
+    # Crea il modello
+    for record in evo.history:
+        #print(f"Score: {record[1]}, Params: {record[0]}")
+        model = factory.create_model(record[0], input_dim, output_dim)
 
-    # Predizioni
-    y_pred = model.predict(X_test)
-    #print(y_pred)
-    #print(y_test)
+        # Allena il modello
+        model.train(X_train, y_train)
 
-    y_pred_np = np.array(y_pred).astype(np.float32)
+        # Predizioni
+        y_pred = model.predict(X_test)
+        preds.append(scaler_y.inverse_transform(y_pred))
+
+
 
     y_test_np = scaler_y.inverse_transform(y_test)
-    y_pred_np = scaler_y.inverse_transform(y_pred_np)
+
+    scores = []
+    for y_pred in preds:
+        score = normalize_metrics(regression_metrics(y_test_np, y_pred))
+        scores.append(score)
+
+    best_score = max(scores)
+    best_index = scores.index(best_score)
+    print(f"Best model index: {best_index} with scores: {best_score} and params: {evo.history[best_index][0]}")
 
     # controllo dimensioni
     print("y_test shape:", y_test_np.shape)
-    print("y_pred shape:", y_pred_np.shape)
+    print("y_pred shape:", preds[best_index].shape)
     y_test_flat = y_test_np.flatten()
-    y_pred_flat = y_pred_np.flatten()
+    y_pred_flat = preds[best_index].flatten()
     
 
     plt.figure(figsize=(6,6))
@@ -302,7 +414,5 @@ if __name__ == "__main__":
     plt.title('Predizioni vs Valori reali')
     plt.show()
     # Valutazione finale
-    score = regression_metrics(y_true=y_test_np, y_pred=y_pred_np)
-    print("Final evaluation metrics:", score)
+    print("Final evaluation metrics:", scores[best_index])
 
-    

@@ -36,11 +36,11 @@ class Evolution:
         """
         if weights is None:
             weights = {
-                "R2": 0.4,
-                "MAE": 0.3,
+                "R2": 0.2,
+                "MAE": 0.2,
                 "RMSE": 0.2,
-                "MAPE": 0.2,
-                "Train_Time": 0.5
+                "MAPE": 0.3,
+                "Train_Time": 0.1
             }
 
         def inv_cost(x: float) -> float:
@@ -66,6 +66,7 @@ class Evolution:
 
             performance_score += contrib
 
+        
         stability_metric = "MAPE_STD" 
         if stability_metric not in metrics_std:
             raise KeyError(f"Metrica di deviazione standard mancante: '{stability_metric}'")

@@ -85,7 +85,7 @@ class TFModel:
             optimizer = optimizers.Adam(learning_rate=lr)
 
 
-        self.model.compile(optimizer=optimizer, loss= 'mae', metrics=["mae", "mse"])
+        self.model.compile(optimizer=optimizer, loss= 'mae', metrics=["mse"])
 
         with tf.device(self.device):
             # Callback early stopping
