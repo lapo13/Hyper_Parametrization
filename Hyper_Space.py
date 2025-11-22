@@ -8,51 +8,19 @@ class HyperparameterSpace:
     def __init__(self):
         self.seen: set[Tuple[Tuple[str, object], ...]] = set()
         self.space = {
-            "learning_rate": ("continuous", 1e-7, 1e-2),  
+            "learning_rate": ("continuous", 10e-4, 10),  
             "architecture": ("categorical", [
                 # Architetture piuma (1 layer)
                 [32],
-                [48],
-                [64],
-                [96],
-                [128],
-                
-                # Architetture leggere (2 layers)
-                [64, 48],
-                [48, 32],
-                [32, 24],
-
-                # Architetture compatte (2 layers)
-                [128, 96],
-                [112, 84],
-                [32, 64],
-                [48, 96],
-
-                # Architetture moderate (3 layers)
-                [64, 48, 36],
-                [48, 32, 24],
-                [32, 24, 16],
-                
-                # Architetture crescenti (3 layers)
-                [24, 48, 96],
-                [32, 64, 128],
-                [16, 32, 64],
-
-                # Architetture profonde (4 layers)
-                [96, 64, 48, 32],
-                [84, 56, 42, 32],
-
-                # Architetture crescenti
-                [32, 48, 64, 80],
-                [16, 24, 32, 48]
+                [64]
             ]), 
             "activation": ("categorical", ["relu"]),
-            "batch_size": ("discrete", [16,32,64,128]), 
-            "dropout": ("discrete", [0.0, 0.2, 0.3, 0.4, 0.5]), 
-            "optimizer": ("categorical", ["adamw", "sgd"]),
-            "weight_decay": ("continuous", 1e-5, 1e-2),
-            "early_stop_patience": ("discrete", [30]), 
-            "epochs": ("discrete", [600])
+            "batch_size": ("discrete", [64]), 
+            "dropout": ("discrete", [0.2, 0.3, 0.4, 0.5]), 
+            "optimizer": ("categorical", ["adamw"]),
+            "weight_decay": ("continuous", 10e-3, 1),
+            "early_stop_patience": ("discrete", [50]), 
+            "epochs": ("discrete", [1000])
             }
 
     def _hash_params(self, params: Dict) -> Tuple[Tuple[str, object], ...]:

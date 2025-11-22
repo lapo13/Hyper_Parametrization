@@ -10,7 +10,7 @@ from Model_tf import TFModelInstantiator
 from valuation import CrossValuation, regression_metrics
 from Evolution import Evolution
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import StandardScaler
 
 def normalize_metrics(
                 metrics_mean: Dict[str, float],
@@ -79,76 +79,60 @@ def smart_interpolation(df_list):
         print(f"Completed dataset {i+1}")
 
 def spezza_serie_in_colonne(df, colonna_stringa, prefix='col_'):
-# Verifica che la colonna esista
+    # --- Controllo colonna ---
     if colonna_stringa not in df.columns:
         raise ValueError(f"La colonna '{colonna_stringa}' non esiste nel DataFrame")
-    
-    # Crea una copia del DataFrame
+
     result_df = df.copy()
-    
-    # Rimuove la colonna originale
-    colonna_originale = result_df.pop(colonna_stringa)
-    
-    # Lista per raccogliere tutti gli array convertiti
-    arrays_convertiti = []
-    
-    # Converte ogni stringa in array numerico
-    for stringa in colonna_originale:
-        # Gestione di valori NaN o stringhe vuote
-        if pd.isna(stringa) or stringa == '':
-            arrays_convertiti.append([])
+
+    # Estraggo la colonna contenente gli embedding
+    col = result_df.pop(colonna_stringa)
+
+    embeddings = []
+
+    for item in col:
+        if pd.isna(item) or item == "":
+            embeddings.append([])
             continue
-            
-        # Rimuove le parentesi quadre se presenti
-        stringa_pulita = str(stringa).strip('[]')
         
-        # Divide per spazi multipli e filtra stringhe vuote
-        valori = [x for x in stringa_pulita.split() if x]
-        
-        # Converte in float
         try:
-            array_numerico = [float(x) for x in valori]
-            arrays_convertiti.append(array_numerico)
-        except ValueError as e:
-            print(f"Errore nella conversione di '{stringa}': {e}")
-            arrays_convertiti.append([])
-    
-    # Trova la lunghezza massima per determinare il numero di colonne
-    lunghezze = [len(arr) for arr in arrays_convertiti]
-    
-    if not lunghezze:
-        raise ValueError("Nessun dato valido trovato nella colonna")
-    
-    lunghezza_max = max(lunghezze)
-    lunghezza_min = min(lunghezze)
-    
-    # Verifica che tutti gli array abbiano la stessa lunghezza
-    if lunghezza_max != lunghezza_min:
-        print(f"Attenzione: array di lunghezze diverse (min: {lunghezza_min}, max: {lunghezza_max})")
-        print("I valori mancanti verranno riempiti con NaN")
-        
-        # Riempie con NaN gli array più corti
-        arrays_completi = []
-        for arr in arrays_convertiti:
-            if len(arr) < lunghezza_max:
-                arr_completo = arr + [np.nan] * (lunghezza_max - len(arr))
-                arrays_completi.append(arr_completo)
-            else:
-                arrays_completi.append(arr)
-    else:
-        arrays_completi = arrays_convertiti
-    
-    # Crea il DataFrame con le nuove colonne
-    nuove_colonne = pd.DataFrame(
-        arrays_completi,
+            # Parsing sicuro della stringa in lista Python
+            vett = ast.literal_eval(item)
+
+            # Se l’embedding è una numpy array o altro iterabile, lo converto in list
+            if not isinstance(vett, list):
+                vett = list(vett)
+
+            # Converto tutto in float
+            vett = [float(x) for x in vett]
+
+            embeddings.append(vett)
+
+        except Exception as e:
+            print(f"Errore nel parsing dell'elemento '{item}': {e}")
+            embeddings.append([])
+
+    # --- Uniformo dimensione dei vettori ---
+    lengths = [len(v) for v in embeddings]
+    if not lengths:
+        raise ValueError("Nessun embedding valido nella colonna")
+
+    max_len = max(lengths)
+
+    embeddings_padded = [
+        v + [np.nan] * (max_len - len(v)) if len(v) < max_len else v
+        for v in embeddings
+    ]
+
+    # --- Creo DataFrame delle nuove colonne ---
+    colonne_embedding = pd.DataFrame(
+        embeddings_padded,
         index=result_df.index,
-        columns=[f"{prefix}{i}" for i in range(lunghezza_max)]
+        columns=[f"{prefix}{i}" for i in range(max_len)]
     )
-    
-    # Combina con il DataFrame originale
-    result_df = pd.concat([result_df, nuove_colonne], axis=1)
-    
-    return result_df
+
+    # --- Merge col DataFrame originale ---
+    return pd.concat([result_df, colonne_embedding], axis=1)
 
 def encode_time_features(df, start_col="interval_start", end_col="interval_end"):
     df = df.copy()
@@ -225,33 +209,33 @@ def is_useful_series(series, zero_ratio_thr=0.85, min_nonzero_value=0.1):
     return True
 
 if __name__ == "__main__":
-    to_keep = ['type_of_TTT', 'min', 'var', 'median', 'interval_end', 
-            'is_festive', 'mean', 'max', 'interval_start', 'linear_trend',
-            'is_weekend', 'EMBEDDING','month', 'avg_variation', 
-            'TTT','day'
-            ]
-
     path = "../data"
 
     # Caricamento dati
-    dati = [pd.read_excel(path+'/'+'METRO_with_embeddings.xlsx', usecols=to_keep)]
+    dati = pd.read_excel(path + '/' + 'NO2_dataset.xlsx')
+    df_completo = dati[dati["serviceUri"] == "http://www.disit.org/km4city/resource/iot/orionUNIFI/DISIT/ARPAT_QA_PO-ROMA"].copy()
+    df_completo.drop(columns=["serviceUri"], inplace=True)
 
+    embedding_cols = ['highway_embedding', 'AreaTypeEmbeddings']
 
     # Interpolazione intelligente†
-    smart_interpolation(dati)
+    #smart_interpolation(dati)
 
     # Concatenazione
-    df_completo = pd.concat(dati, ignore_index=True)
+    #df_completo = pd.concat(dati, ignore_index=True)
 
     # Filtra righe che non contengono "nan"
     mask = ~df_completo['TTT'].str.contains("nan", na=False)
     df_completo = df_completo[mask]
 
-    
+    print(f"Data shape before embedding expansion: {df_completo.shape}")
 
     # Preprocessing
     df_completo['TTT'] = df_completo['TTT'].apply(ast.literal_eval)
-    df_completo = spezza_serie_in_colonne(df_completo, 'EMBEDDING', prefix='emb_')
+    for col in embedding_cols:
+        df_completo = spezza_serie_in_colonne(df_completo, col, prefix='emb_{col}_')
+
+    print(f"Data shape after embedding expansion: {df_completo.shape}")
 
     # Filtra le righe dove la colonna TTT ha lunghezza 24
     dtset_filtrato = df_completo[df_completo["TTT"].apply(lambda x: len(x) == 24)].sample(frac=1).reset_index(drop=True)
@@ -263,7 +247,7 @@ if __name__ == "__main__":
     df_useful = dtset_filtrato[mask_useful]
 
     categorical = [
-    'is_weekend','is_festive'
+    'is_weekend'
     ]
 
     #print(f'useful columns: {df_useful.columns.tolist()}')
@@ -302,7 +286,7 @@ if __name__ == "__main__":
     # Passo anche std_bins per poter stratificare
     X_train, X_test, y_train, y_test= train_test_split(
         X_np, y_np,
-        test_size=0.1,
+        test_size=0.2,
         random_state=42,
         stratify=std_bins,
         shuffle=True
@@ -313,12 +297,12 @@ if __name__ == "__main__":
     print(f"Test size: {X_test.shape}, {y_test.shape}")
 
     # Scaler per input
-    scaler_X = RobustScaler()
+    scaler_X = StandardScaler()
     X_train = scaler_X.fit_transform(X_train)
     X_test  = scaler_X.transform(X_test)
 
     # Scaler per output
-    scaler_y = RobustScaler()
+    scaler_y = StandardScaler()
     y_train = scaler_y.fit_transform(y_train)
     y_test  = scaler_y.transform(y_test)
 
@@ -328,36 +312,37 @@ if __name__ == "__main__":
     print("After normalization:")
     print(f"X_train: {X_train.shape}, mean={X_train.mean():.4f}, std={X_train.std():.4f}")
     
+    #raise SystemExit("Stop for debug")
 
     # Componenti
     space = HyperparameterSpace()
     factory = TFModelInstantiator()
-    valuation = CrossValuation(factory, X_train, y_train, iter= 3, k = 4)
+    valuation = CrossValuation(factory, X_train, y_train, iter= 1, k = 4)
     evo = Evolution(space, elitism=1, tournament_size=2, crossover_type="uniform", base_mutation_rate=0.25)
 
     # Popolazione iniziale
-    pop_size = 256
+    pop_size = 64
     population = [space.sample() for _ in range(pop_size)]
 
     MIN_POP_SIZE = 4
     REDUCTION_FACTOR = 0.5  # riduzione 
     BASE_INTERVAL = 1
-    COUNT = 1
+    COUNT = 0
 
     # Ciclo evolutivo 
     generations = 9
     for gen in range(generations):
         
         print(f"------------------------------generation n: {gen}-----------------------------------\n")
+
         if (COUNT % BASE_INTERVAL == 0) and (gen != 0) and (pop_size > MIN_POP_SIZE):
             new_pop_size = max(MIN_POP_SIZE, int(pop_size * REDUCTION_FACTOR))
-            
             if new_pop_size < pop_size:
                 pop_size = new_pop_size
                 print(f"--------------------- Population decreased to {pop_size} at generation {gen}")
 
-        results = valuation.evaluate(population, gen=gen, higher_bound=32, lower_bound=8)
-        if evo.early_stop_criteria(patience=4, tolerance= 5e-3):
+        results = valuation.evaluate(population, gen=gen, higher_bound=16, lower_bound=4)
+        if evo.early_stop_criteria(patience=2, tolerance= 5e-3):
             break
         
         population = evo.evolve(results, pop_size=pop_size, max_generations=generations)
